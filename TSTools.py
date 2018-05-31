@@ -56,7 +56,7 @@ def ConvertCSVtoTSDs(fp, dest_dir='', save=True):
         tsds.append(tsd)
         # save TSData (without metadata)
         if (save):
-            tsd.save(dest_dir+name+'.tsd')
+            tsd.save(os.path.join(dest_dir,name+'.tsd'))
     return tsds
 
 # read tsd file's gene matrix (at once)
@@ -293,16 +293,38 @@ def do_DESeq(tsl):
 
 
 # DEG with foldchange with t-value (TODO: max - min ?)
+def maxabs(a, axis=None):
+    """Return slice of a, keeping only those values that are furthest away
+    from 0 along axis"""
+    maxa = a.max(axis=axis)
+    mina = a.min(axis=axis)
+    p = abs(maxa) >= abs(mina) # bool, or indices where +ve values win
+    n = abs(mina) > abs(maxa)  # bool, or indices where -ve values win
+    if axis == None:
+        if p: return maxa
+        else: return mina
+    shape = list(a.shape)
+    shape.pop(axis)
+    out = np.zeros(shape, dtype=a.dtype)
+    out[p] = maxa[p]
+    out[n] = mina[n]
+    return out
 def _do_DEG_FC(tsd, fc=0.6):
     # get all time series
     # and get average of these std.
     series = tsd.getSeries()
     samples_first = np.mean( tsd.df[series.loc["samples"][0].split(',')] ,axis=1)
-    samples_last = np.mean( tsd.df[series.loc["samples"][-1].split(',')] ,axis=1)
-    series_FC = samples_last - samples_first
-    #print series_FC[:20]
+    samples_avgmat = []
+    for i in range(1,len(series.loc["samples"])):
+        samples_avgmat.append( np.mean( tsd.df[series.loc["samples"][i].split(',')] ,axis=1) )
+    samples_avgmat = np.vstack(samples_avgmat).transpose()
+    # last sample: biggest or smallest value after first sample
+    amax_diff = samples_avgmat.max(axis=1) - samples_first
+    amin_diff = samples_avgmat.min(axis=1) - samples_first
+    series_FC = maxabs(np.stack((amax_diff, amin_diff)), axis=0)
+    #samples_last = np.mean( tsd.df[series.loc["samples"][-1].split(',')] ,axis=1)
+    #series_FC = samples_last - samples_first
     df_pv = pd.Series(fc / np.abs(series_FC) * 0.05, index=tsd.df.index)
-    #print df_pv
     df_tv = pd.Series(series_FC, index=tsd.df.index)
     #samples_std = np.std(samples, axis=1, ddof=1)
     return {'pvalue': df_pv, 'tvalue': df_tv}
